@@ -12,6 +12,11 @@ Chronological record of merged PRs and closed issues. Maintained by the Guide tr
 - [2026-06](work_log/WORK_LOG_2026-06.md)
 - [2026-05](work_log/WORK_LOG_2026-05.md)
 
+### 2026-11-23
+
+- **PR #1536**: fix: strip foreign BEGIN/END blocks from the installed .anvil/CLAUDE.md
+- **Issue #1535** (closed): Consumer .anvil/CLAUDE.md ships the source repo's own Loom and Repo Skills blocks
+
 ### 2026-11-18
 
 - **PR #1530**: docs: name the script's tip-ref check as the gate's empty-base_ref guard, pin with test
