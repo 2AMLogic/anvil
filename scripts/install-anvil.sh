@@ -947,8 +947,64 @@ The canonical skill body and any consumer overrides live at .anvil/skills/$skill
 SHIMEOF
 }
 
+# Copy <src> to stdout, omitting every `<!-- BEGIN <NAME> --> ... <!-- END
+# <NAME> -->` block (inclusive). Other tools' installers (Loom, Repo Skills)
+# write such blocks into the Anvil SOURCE CLAUDE.md; they describe that repo,
+# not the consumer, so they must not reach the consumer's .anvil/CLAUDE.md
+# (#1535). Generic over the block name so future tool blocks are covered.
+#
+# Text on the marker lines but outside the markers is kept (a heading may
+# share a line with its BEGIN marker); a line left empty by the removal is
+# dropped. An unterminated BEGIN passes the rest of the file through verbatim
+# with a stderr warning rather than silently truncating the guide. A source
+# with no BEGIN marker is copied with plain `cat`, byte-identical.
+strip_foreign_marker_blocks() {
+  local src="$1"
+  if ! grep -q '<!-- BEGIN [^>]* -->' "$src"; then
+    cat "$src"
+    return
+  fi
+  awk '
+    function flush_unterminated() {
+      if (in_block) {
+        printf "%s", raw
+        print "warn: unterminated <!-- BEGIN --> marker in guide source; block passed through" > "/dev/stderr"
+      }
+    }
+    {
+      line = $0
+      if (in_block) raw = raw $0 "\n"; else raw = $0 "\n"
+      touched = in_block
+      while (length(line) > 0) {
+        if (!in_block) {
+          if (match(line, /<!-- BEGIN [^>]* -->/)) {
+            carry = carry substr(line, 1, RSTART - 1)
+            line = substr(line, RSTART + RLENGTH)
+            in_block = 1
+            touched = 1
+          } else {
+            carry = carry line
+            line = ""
+          }
+        } else if (match(line, /<!-- END [^>]* -->/)) {
+          line = substr(line, RSTART + RLENGTH)
+          in_block = 0
+        } else {
+          line = ""
+        }
+      }
+      if (in_block) next
+      if (!touched) { print carry; carry = ""; next }
+      if (carry != "") print carry
+      carry = ""
+    }
+    END { flush_unterminated() }
+  ' "$src"
+}
+
 # Write the full Anvil guide to <target>/.anvil/CLAUDE.md, prefixed with a
 # generated-by header. Uses bash heredoc + plain `cat` (no child-shell re-parse).
+# Foreign tool marker blocks in the source are stripped (#1535).
 write_guide() {
   local target_dir="$1" anvil_version="$2" install_date="$3" anvil_src_claude_md="$4" guide_dst="$5"
   mkdir -p "$target_dir/.anvil"
@@ -957,7 +1013,7 @@ write_guide() {
     echo "<!-- Anvil Version: $anvil_version -->"
     echo "<!-- Install Date: $install_date -->"
     echo ''
-    cat "$anvil_src_claude_md"
+    strip_foreign_marker_blocks "$anvil_src_claude_md"
   } > "$guide_dst"
 }
 
