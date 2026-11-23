@@ -76,7 +76,11 @@ def test_blocks_removed_and_surrounding_prose_kept(tmp_path: Path) -> None:
     assert not MARKER_RE.search(guide)
     assert "LOOM-ONLY-BODY" not in guide
     assert "REPO-ONLY-BODY" not in guide
-    assert stderr == ""
+    # One info line per stripped block, naming it and its source line span.
+    assert stderr.splitlines() == [
+        "info: stripped foreign block 'LOOM ORCHESTRATION' (SRC_CLAUDE.md:4-6)",
+        "info: stripped foreign block 'REPO-SKILLS' (SRC_CLAUDE.md:7-9)",
+    ]
     # Generated-by header unchanged; heading sharing the marker line survives.
     assert (
         guide
@@ -88,14 +92,20 @@ def test_unrelated_block_names_are_also_stripped(tmp_path: Path) -> None:
     source = (
         "a\n<!-- BEGIN SOME-FUTURE-TOOL -->\nbody\n<!-- END SOME-FUTURE-TOOL -->\nb\n"
     )
-    guide, _ = _write_guide(tmp_path, source)
+    guide, stderr = _write_guide(tmp_path, source)
     assert guide == HEADER + "a\nb\n"
+    assert stderr.splitlines() == [
+        "info: stripped foreign block 'SOME-FUTURE-TOOL' (SRC_CLAUDE.md:2-4)"
+    ]
 
 
 def test_text_after_end_marker_is_kept(tmp_path: Path) -> None:
     source = "x <!-- BEGIN T -->\nbody\n<!-- END T --> y\nz\n"
-    guide, _ = _write_guide(tmp_path, source)
+    guide, stderr = _write_guide(tmp_path, source)
     assert guide == HEADER + "x  y\nz\n"
+    assert stderr.splitlines() == [
+        "info: stripped foreign block 'T' (SRC_CLAUDE.md:1-3)"
+    ]
 
 
 def test_unterminated_begin_passes_through_with_warning(tmp_path: Path) -> None:
@@ -103,6 +113,7 @@ def test_unterminated_begin_passes_through_with_warning(tmp_path: Path) -> None:
     guide, stderr = _write_guide(tmp_path, source)
     assert guide == HEADER + source
     assert "unterminated" in stderr
+    assert "stripped foreign block" not in stderr
 
 
 def test_source_without_blocks_is_byte_identical(tmp_path: Path) -> None:
@@ -111,6 +122,29 @@ def test_source_without_blocks_is_byte_identical(tmp_path: Path) -> None:
     guide, stderr = _write_guide(tmp_path, source)
     assert guide == HEADER + source
     assert stderr == ""
+
+
+def test_prose_mention_of_begin_marker_logs_oversized_span(tmp_path: Path) -> None:
+    # The match is positional: a prose mention of a BEGIN marker pairs with the
+    # next real END marker and swallows everything between (#1537). The strip
+    # itself is unchanged, but the span in the info line makes it visible.
+    filler = "".join(f"guide line {i}\n" for i in range(1, 41))
+    source = (
+        "# Guide\n"
+        "Mentioning <!-- BEGIN LOOM ORCHESTRATION --> inline in prose.\n"
+        + filler
+        + "<!-- BEGIN LOOM ORCHESTRATION -->\nreal body\n"
+        "<!-- END LOOM ORCHESTRATION -->\n"
+        "tail\n"
+    )
+    guide, stderr = _write_guide(tmp_path, source)
+    lines = stderr.splitlines()
+    assert lines == [
+        "info: stripped foreign block 'LOOM ORCHESTRATION' (SRC_CLAUDE.md:2-45)"
+    ]
+    # The unintended deletion is real: the filler is gone from the guide.
+    assert "guide line 1\n" not in guide
+    assert guide == HEADER + "# Guide\nMentioning \ntail\n"
 
 
 def test_real_installer_run_ships_no_foreign_blocks(tmp_path: Path) -> None:
@@ -126,6 +160,16 @@ def test_real_installer_run_ships_no_foreign_blocks(tmp_path: Path) -> None:
 
     guide = (target / ".anvil" / "CLAUDE.md").read_text()
     source = (REPO_ROOT / "CLAUDE.md").read_text()
+    # Exactly the two known blocks are stripped from the real source -- an
+    # unintended extra strip (e.g. a prose-mention pairing) changes this list.
+    stripped = re.findall(
+        r"^info: stripped foreign block '([^']*)' \(CLAUDE\.md:(\d+)-(\d+)\)$",
+        result.stderr + result.stdout,
+        flags=re.MULTILINE,
+    )
+    assert [name for name, _, _ in stripped] == ["LOOM ORCHESTRATION", "REPO-SKILLS"]
+    for _, start, end in stripped:
+        assert int(end) - int(start) < 20  # real blocks are small
     assert not MARKER_RE.search(guide)
     assert "LOOM ORCHESTRATION" not in guide
     assert "REPO-SKILLS" not in guide
