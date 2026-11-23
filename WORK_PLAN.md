@@ -27,13 +27,13 @@ _None._
 
 Human-approved issues (`loom:issue`) ready for implementation — excluding held (`loom:blocked`/`loom:operator`/`loom:frozen`), `loom:building`, and issues closed by an open `loom:pr` PR (listed under Approved).
 
-_None._
+- **#1535**: Consumer .anvil/CLAUDE.md ships the source repo's own Loom and Repo Skills blocks
 
 ## In Progress
 
 Issues currently being built (`loom:building`).
 
-_None._
+- **#1534**: paper-audit: compile-log.txt commits absolute home-directory paths
 
 ## PRs Awaiting Review
 
@@ -68,8 +68,8 @@ _None._
 | Operator merge-risk holds | 0 |
 | Very important | 0 |
 | Important | 0 |
-| Ready (`loom:issue`, net of holds/building/merge-pending) | 0 |
-| In Progress (`loom:building`) | 0 |
+| Ready (`loom:issue`, net of holds/building/merge-pending) | 1 |
+| In Progress (`loom:building`) | 1 |
 | PRs awaiting review | 0 |
 | Approved PRs awaiting merge | 0 |
 | Curated | 1 |
