@@ -27,6 +27,7 @@ _None._
 
 Human-approved issues (`loom:issue`) ready for implementation — excluding held (`loom:blocked`/`loom:operator`/`loom:frozen`), `loom:building`, and issues closed by an open `loom:pr` PR (listed under Approved).
 
+- **#1533**: Installed docs still link to the pre-move rjwalters/* GitHub owner
 - **#1534**: paper-audit: compile-log.txt commits absolute home-directory paths
 
 ## In Progress
@@ -68,7 +69,7 @@ _None._
 | Operator merge-risk holds | 0 |
 | Very important | 0 |
 | Important | 0 |
-| Ready (`loom:issue`, net of holds/building/merge-pending) | 1 |
+| Ready (`loom:issue`, net of holds/building/merge-pending) | 2 |
 | In Progress (`loom:building`) | 0 |
 | PRs awaiting review | 0 |
 | Approved PRs awaiting merge | 0 |
