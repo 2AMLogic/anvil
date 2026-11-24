@@ -171,7 +171,15 @@ for shell-driven figurers.
 On render failure: write a stub `figures/<name>.png-FAILED.md` describing
 the error, leave the prior PNG (if any) in place, continue with other
 figures. A failed render is a visible, debuggable artifact — never a
-silently broken reference.
+silently broken reference. **Redact home-directory paths before any
+`*-FAILED.md` stub this command writes lands in the tracked version dir
+(issue #1546)**: captured `mmdc` / `marp` / `python3` errors name files
+by absolute path (`/home/<user>/...` — local username included), and a
+tracked stub in a public consumer repo cannot be un-pushed. Captured
+tool/exception text MUST pass through `anvil.lib.sidecar.redact_home_paths()`
+(the issue #1534 redaction contract) before it is written into the stub —
+the redaction rewrites only the home prefix to `~`, so the diagnostic
+detail survives.
 
 ### 2. matplotlib (default for data plots)
 

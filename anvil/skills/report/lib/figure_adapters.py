@@ -77,6 +77,7 @@ from pathlib import Path
 from typing import Any
 
 from anvil.lib.atomic_write import atomic_replace
+from anvil.lib.sidecar import redact_home_paths
 
 __all__ = (
     "OUTPUT_KINDS",
@@ -422,11 +423,16 @@ def _write_failed_stub(
 
     Mirrors deck-imagegen's ``<slot>.png-FAILED.md`` shape: the stub
     records what was attempted and why it failed so the reviser /
-    operator can act without re-running the phase blind.
+    operator can act without re-running the phase blind. The captured
+    stderr passes through :func:`anvil.lib.sidecar.redact_home_paths`
+    before it is written (issue #1546, the #1534 redaction contract
+    extended to failure stubs): adapter stderr routinely names absolute
+    paths (``/home/<user>/...``), and a tracked stub in a public
+    consumer repo cannot be un-pushed.
     """
     stub = output_path.parent / (output_path.name + ".FAILED.md")
     cmd_line = " ".join(shlex.quote(t) for t in argv) if argv else "(not invoked)"
-    stderr_block = stderr.strip() or "(no stderr captured)"
+    stderr_block = redact_home_paths(stderr.strip()) or "(no stderr captured)"
     text = (
         f"# figure-adapter failure: {adapter.name} / {unit}\n"
         f"\n"
