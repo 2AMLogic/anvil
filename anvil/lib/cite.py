@@ -316,7 +316,7 @@ def _cache_write(identifier: Identifier, record: BibRecord) -> None:
 
 # Polite-pool User-Agent. Crossref recommends including a contact email
 # in the agent string; arXiv has no such requirement but accepts it.
-_USER_AGENT = "anvil-cite/0.0.1 (https://github.com/rjwalters/anvil)"
+_USER_AGENT = "anvil-cite/0.0.1 (https://github.com/2AMLogic/anvil)"
 
 # Per-attempt timeout (seconds) and the backoff schedule. Three attempts
 # total: initial + two retries at 1s and 2s. HTTP 4xx is NOT retried.

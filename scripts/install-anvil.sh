@@ -183,7 +183,7 @@ usage() {
 # leaking into the shared ANVIL_POINTER prose.
 ANVIL_MARK_BEGIN='<!-- BEGIN ANVIL -->'
 ANVIL_MARK_END='<!-- END ANVIL -->'
-ANVIL_POINTER='This repository uses [Anvil](https://github.com/rjwalters/anvil) for AI-powered artifact creation. See `.anvil/CLAUDE.md` for the full guide (skills, rubric, state machine). To upgrade Anvil, re-run `install-anvil.sh .` from the anvil checkout without `--skills=` to pick up newly-shipped skills; pass `--skills=...` only to install a strict subset.'
+ANVIL_POINTER='This repository uses [Anvil](https://github.com/2AMLogic/anvil) for AI-powered artifact creation. See `.anvil/CLAUDE.md` for the full guide (skills, rubric, state machine). To upgrade Anvil, re-run `install-anvil.sh .` from the anvil checkout without `--skills=` to pick up newly-shipped skills; pass `--skills=...` only to install a strict subset.'
 ANVIL_ADAPTER_CLAUDE='In Claude Code, invoke an installed skill via `/anvil:<skill>` (e.g. `/anvil:paper-draft <slug>`) -- the per-skill registration shim lives at `.claude/skills/anvil-<skill>/`.'
 ANVIL_ADAPTER_CODEX='In Codex, an installed skill is registered at `.agents/skills/anvil-<skill>/SKILL.md` -- invoke it from the skill picker by name; the registration is a thin pointer back to the canonical body under `.anvil/skills/<skill>/`.'
 

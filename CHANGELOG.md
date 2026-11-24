@@ -12,6 +12,8 @@
 
 ### Fixed
 
+- **Anvil-owned links now point at `2AMLogic/anvil` instead of the pre-move `rjwalters/anvil` owner** (#1533). The `BEGIN ANVIL` pointer block `install-anvil.sh` writes into a consumer's `CLAUDE.md` / `AGENTS.md` (rewritten in place on re-install, no duplicate block), the `pyproject.toml` `Homepage` / `Issues` URLs, the `anvil-cite` and `anvil-ip-search` `User-Agent` strings, the matching curl examples in `anvil/lib/README.md`, and the `README.md` issues link. URLs for other projects (`rjwalters/loom`, `rjwalters/repo`, `rjwalters/safehouse`) and the resync-managed vendored trees are deliberately unchanged.
+
 - **Raised the `pydantic` floor to `>=2.14.3` (#1532).** The source `pyproject.toml` base dependency and the consumer `pyproject.toml` that `install-anvil.sh` generates now agree on the new lower bound (the installer heredoc was still pinned to `>=2.14.2`, failing `test_install_produces_consumer_pyproject_toml`); the `CLAUDE.md` Python-deps line is synced.
 
 - **Installed `.anvil/CLAUDE.md` no longer carries the Anvil source repo's Loom and Repo Skills blocks** (#1535). `write_guide()` copied the source `CLAUDE.md` verbatim, so every consumer's guide included the `<!-- BEGIN LOOM ORCHESTRATION -->` and `<!-- BEGIN REPO-SKILLS -->` blocks that those tools' installers write about the Anvil repo itself. The installer now omits every `<!-- BEGIN X --> … <!-- END X -->` block generically (text outside the markers, including the `## Status of work` heading, is kept; an unterminated BEGIN passes through with a warning; a source with no blocks is copied unchanged). The source `CLAUDE.md` is not modified.

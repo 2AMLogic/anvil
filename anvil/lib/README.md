@@ -900,11 +900,11 @@ provided for smoke testing and is skipped by default.
 To record additional cassettes:
 
 ```bash
-curl -H "User-Agent: anvil-cite/0.0.1 (https://github.com/rjwalters/anvil)" \
+curl -H "User-Agent: anvil-cite/0.0.1 (https://github.com/2AMLogic/anvil)" \
   "https://api.crossref.org/works/10.xxx/xxx" \
   > tests/lib/cassettes/cite/crossref-10.xxx_xxx.json
 
-curl -H "User-Agent: anvil-cite/0.0.1 (https://github.com/rjwalters/anvil)" \
+curl -H "User-Agent: anvil-cite/0.0.1 (https://github.com/2AMLogic/anvil)" \
   "https://export.arxiv.org/api/query?id_list=YYMM.NNNNN" \
   > tests/lib/cassettes/cite/arxiv-YYMM.NNNNN.xml
 ```
