@@ -14,6 +14,8 @@ Chronological record of merged PRs and closed issues. Maintained by the Guide tr
 
 ### 2026-11-24
 
+- **PR #1552**: fix: redact home paths in report figure-adapter FAILED-stub Command line
+- **Issue #1550** (closed): report figure-adapter *.FAILED.md stub still leaks $HOME via its **Command**: line
 - **PR #1549**: fix: redact home-directory paths in *-FAILED.md failure-stub output
 - **Issue #1546** (closed): Failure-stub writers (deck/slides/report) can land absolute home paths in tracked version dirs — the capture class #1534 did not cover
 - **PR #1548**: fix: set max_print_line=10000 on LaTeX engine invocations
