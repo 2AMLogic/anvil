@@ -12,8 +12,14 @@ Chronological record of merged PRs and closed issues. Maintained by the Guide tr
 - [2026-06](work_log/WORK_LOG_2026-06.md)
 - [2026-05](work_log/WORK_LOG_2026-05.md)
 
+### 2026-11-24
+
+- **PR #1532**: chore(deps): update pydantic requirement from >=2.14.2 to >=2.14.3
+
 ### 2026-11-23
 
+- **PR #1538**: fix: log each foreign block stripped from the installed .anvil/CLAUDE.md
+- **Issue #1537** (closed): install-anvil: strip_foreign_marker_blocks removes guide content silently (no record of what was stripped)
 - **PR #1536**: fix: strip foreign BEGIN/END blocks from the installed .anvil/CLAUDE.md
 - **Issue #1535** (closed): Consumer .anvil/CLAUDE.md ships the source repo's own Loom and Repo Skills blocks
 
