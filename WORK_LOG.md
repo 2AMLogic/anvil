@@ -14,6 +14,10 @@ Chronological record of merged PRs and closed issues. Maintained by the Guide tr
 
 ### 2026-11-24
 
+- **PR #1544**: fix: redact home-directory paths from compile logs landed via sidecar copy
+- **Issue #1534** (closed): paper-audit: compile-log.txt commits absolute home-directory paths
+- **PR #1543**: fix: point anvil-owned links at 2AMLogic/anvil instead of rjwalters/anvil
+- **Issue #1533** (closed): Installed docs still link to the pre-move rjwalters/* GitHub owner
 - **PR #1532**: chore(deps): update pydantic requirement from >=2.14.2 to >=2.14.3
 
 ### 2026-11-23
