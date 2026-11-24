@@ -12,6 +12,8 @@
 
 ### Fixed
 
+- **Raised the `pydantic` floor to `>=2.14.3` (#1532).** The source `pyproject.toml` base dependency and the consumer `pyproject.toml` that `install-anvil.sh` generates now agree on the new lower bound (the installer heredoc was still pinned to `>=2.14.2`, failing `test_install_produces_consumer_pyproject_toml`); the `CLAUDE.md` Python-deps line is synced.
+
 - **Installed `.anvil/CLAUDE.md` no longer carries the Anvil source repo's Loom and Repo Skills blocks** (#1535). `write_guide()` copied the source `CLAUDE.md` verbatim, so every consumer's guide included the `<!-- BEGIN LOOM ORCHESTRATION -->` and `<!-- BEGIN REPO-SKILLS -->` blocks that those tools' installers write about the Anvil repo itself. The installer now omits every `<!-- BEGIN X --> … <!-- END X -->` block generically (text outside the markers, including the `## Status of work` heading, is kept; an unterminated BEGIN passes through with a warning; a source with no blocks is copied unchanged). The source `CLAUDE.md` is not modified.
 
 - **The installer now reports every foreign block it strips from the installed `.anvil/CLAUDE.md`** (#1537). The #1535 filter is positional, so a prose mention of `<!-- BEGIN LOOM ORCHESTRATION -->` above the real block would have paired with the next `END` marker and silently deleted the span between them. Each stripped block now logs one stderr line, `info: stripped foreign block 'NAME' (CLAUDE.md:A-B)`, so an install run states exactly what left the guide and an oversized span is visible. Matching is unchanged; the regression test asserts the exact stripped names for the real source file and the oversized span for a prose-mention fixture.
