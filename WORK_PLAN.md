@@ -33,7 +33,8 @@ _None._
 
 Issues currently being built (`loom:building`).
 
-_None._
+- **#1534**: paper-audit: compile-log.txt commits absolute home-directory paths
+- **#1537**: install-anvil: strip_foreign_marker_blocks removes guide content silently (no record of what was stripped)
 
 ## PRs Awaiting Review
 
@@ -69,7 +70,7 @@ _None._
 | Very important | 0 |
 | Important | 0 |
 | Ready (`loom:issue`, net of holds/building/merge-pending) | 0 |
-| In Progress (`loom:building`) | 0 |
+| In Progress (`loom:building`) | 2 |
 | PRs awaiting review | 0 |
 | Approved PRs awaiting merge | 0 |
 | Curated | 1 |

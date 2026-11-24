@@ -958,13 +958,21 @@ SHIMEOF
 # dropped. An unterminated BEGIN passes the rest of the file through verbatim
 # with a stderr warning rather than silently truncating the guide. A source
 # with no BEGIN marker is copied with plain `cat`, byte-identical.
+#
+# Every stripped block is reported on stderr, one line each, naming the block
+# and its source line span: `info: stripped foreign block 'NAME' (FILE:A-B)`
+# (#1537). The match is positional, so a prose mention of a BEGIN marker would
+# pair with the next END and delete everything between; the span makes that
+# visible in the install log instead of a silent deletion.
 strip_foreign_marker_blocks() {
   local src="$1"
+  local srcname
+  srcname="$(basename "$src")"
   if ! grep -q '<!-- BEGIN [^>]* -->' "$src"; then
     cat "$src"
     return
   fi
-  awk '
+  awk -v srcname="$srcname" '
     function flush_unterminated() {
       if (in_block) {
         printf "%s", raw
@@ -979,6 +987,10 @@ strip_foreign_marker_blocks() {
         if (!in_block) {
           if (match(line, /<!-- BEGIN [^>]* -->/)) {
             carry = carry substr(line, 1, RSTART - 1)
+            block_name = substr(line, RSTART, RLENGTH)
+            sub(/^<!-- BEGIN /, "", block_name)
+            sub(/ -->$/, "", block_name)
+            block_start = NR
             line = substr(line, RSTART + RLENGTH)
             in_block = 1
             touched = 1
@@ -989,6 +1001,7 @@ strip_foreign_marker_blocks() {
         } else if (match(line, /<!-- END [^>]* -->/)) {
           line = substr(line, RSTART + RLENGTH)
           in_block = 0
+          printf "info: stripped foreign block '"'"'%s'"'"' (%s:%d-%d)\n", block_name, srcname, block_start, NR > "/dev/stderr"
         } else {
           line = ""
         }
