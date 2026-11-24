@@ -27,8 +27,8 @@ _None._
 
 Human-approved issues (`loom:issue`) ready for implementation — excluding held (`loom:blocked`/`loom:operator`/`loom:frozen`), `loom:building`, and issues closed by an open `loom:pr` PR (listed under Approved).
 
-- **#1533**: Installed docs still link to the pre-move rjwalters/* GitHub owner
-- **#1534**: paper-audit: compile-log.txt commits absolute home-directory paths
+- **#1545**: Home-path redaction (#1534) misses wrap-split paths: pdflatex logs wrap at 79 cols and max_print_line is never set
+- **#1546**: Failure-stub writers (deck/slides/report) can land absolute home paths in tracked version dirs — the capture class #1534 did not cover
 
 ## In Progress
 
