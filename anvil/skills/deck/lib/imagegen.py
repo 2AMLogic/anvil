@@ -75,6 +75,7 @@ from typing import Any, Mapping
 # how it composes with the pre-#382 flat-layout fallback.
 from anvil.lib.atomic_write import atomic_write_json
 from anvil.lib.latest_resolution import resolve_latest
+from anvil.lib.sidecar import redact_home_paths
 
 # Import the prompt-journal primitive from the sibling module. The
 # fallback path mirrors the test-import convention in
@@ -1249,6 +1250,13 @@ def _write_failed_stub(
     """Write the ``<slot>.png-FAILED.md`` stub per deck-imagegen § Procedure 6.
 
     The stub records the prompt, style, and the str() of the exception.
+    The exception text passes through
+    :func:`anvil.lib.sidecar.redact_home_paths` before it is written
+    (issue #1546, the #1534 redaction contract extended to failure
+    stubs): adapter errors routinely name absolute paths
+    (``/home/<user>/venv/...``), and a tracked stub in a public consumer
+    repo cannot be un-pushed. The prompt echo is the author's own text,
+    not captured tool output, so it is deliberately left untouched.
     Any pre-existing PNG at ``<slot>.png`` is left in place (per the
     spec: "leave any prior PNG in place, and continue with the next
     prompt"). The auditor can read the stub to see why a slide's image
@@ -1262,7 +1270,7 @@ def _write_failed_stub(
         f"- **Exception type**: `{type(exc).__name__}`\n"
         f"- **Message**:\n"
         f"\n"
-        f"```\n{exc}\n```\n"
+        f"```\n{redact_home_paths(str(exc))}\n```\n"
         f"\n"
         f"## Prompt sent to backend\n"
         f"\n"

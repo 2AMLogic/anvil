@@ -78,6 +78,8 @@ class BackendError(Exception):
 
 Adapters MAY define `BackendError` themselves or import the canonical version that the Phase 2 implementation (Epic #130 / issue E) ships under `anvil/lib/` once the command lands. v0 contract: any exception type with `BackendError` in its MRO is caught as a backend error; bare `Exception` subclasses propagate (and fail the command). This decision keeps the contract decoupled from import order — a consumer adapter can define its own `BackendError` symbol without importing anvil internals.
 
+**Failure-stub redaction (issue #1546).** The `<prompt-id>.png-FAILED.md` stub's body is the exception's `str()`, and adapter errors routinely name absolute paths (`/home/<user>/venv/...` — local username included) that cannot be un-pushed from a public consumer repo. `deck-imagegen` therefore applies `anvil.lib.sidecar.redact_home_paths()` (the issue #1534 redaction contract) to the captured exception text before writing the stub — the redaction rewrites only the home prefix to `~`, so the diagnostic detail survives. Redaction is applied by anvil itself on the captured `str(exc)`, so no adapter cooperation is required: an adapter MAY avoid absolute paths in its own messages, but it does not have to.
+
 ## Consumer registration
 
 The consumer registers their adapter via `.anvil/config.json` at the repo root:

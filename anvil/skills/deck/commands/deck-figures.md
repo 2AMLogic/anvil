@@ -177,7 +177,15 @@ Nested under the thread root `<thread>/`:
    On render failure: write a stub `figures/<name>.png-FAILED.md` describing
    the error, leave the prior PNG (if any) in place, continue with other
    figures. A failed render is a visible, debuggable artifact — never a
-   silently broken reference.
+   silently broken reference. **Redact home-directory paths before any
+   `*-FAILED.md` stub this command writes lands in the tracked version
+   dir (issue #1546)**: captured `mmdc` / `marp` / `python3` errors name
+   files by absolute path (`/home/<user>/...` — local username included),
+   and a tracked stub in a public consumer repo cannot be un-pushed.
+   Captured tool/exception text MUST pass through
+   `anvil.lib.sidecar.redact_home_paths()` (the issue #1534 redaction
+   contract) before it is written into the stub — the redaction rewrites
+   only the home prefix to `~`, so the diagnostic detail survives.
 5. **Render matplotlib charts**:
    - For each `figures/src/<name>.py`: run the script. Convention: the script accepts the working directory `figures/src/` and writes its output to `figures/<name>.png`.
    - **Apply the shared Anvil figure style** so charts are on-brand by default:
@@ -211,7 +219,7 @@ Nested under the thread root `<thread>/`:
      fig.tight_layout()
      fig.savefig(OUT)                              # 200 DPI + transparent from the style
      ```
-   - Run with `python3 figures/src/<name>.py`. Capture stdout/stderr; on non-zero exit, write a stub `figures/<name>.png-FAILED.md` describing the error.
+   - Run with `python3 figures/src/<name>.py`. Capture stdout/stderr; on non-zero exit, write a stub `figures/<name>.png-FAILED.md` describing the error (captured text passes through `anvil.lib.sidecar.redact_home_paths()` first — issue #1546).
    - See `assets/figure-conventions.md` for matplotlib `$`-escaping, DPI, palette, transparency, and output-path conventions.
 
    **5b. Figure legibility preflight** (issue #563). Once all figures have been rendered (mermaid + matplotlib), run the deterministic legibility gate to catch figures that are *present and well-formed yet illegible at the slide's rendered height*. This is the **cheap mechanical pre-flight before the expensive VLM `deck-design` critic** — same principle as the `slide-content-overflow` lint and the `auto_shrink_detector`.
