@@ -14,6 +14,10 @@ Chronological record of merged PRs and closed issues. Maintained by the Guide tr
 
 ### 2026-11-24
 
+- **PR #1549**: fix: redact home-directory paths in *-FAILED.md failure-stub output
+- **Issue #1546** (closed): Failure-stub writers (deck/slides/report) can land absolute home paths in tracked version dirs — the capture class #1534 did not cover
+- **PR #1548**: fix: set max_print_line=10000 on LaTeX engine invocations
+- **Issue #1545** (closed): Home-path redaction (#1534) misses wrap-split paths: pdflatex logs wrap at 79 cols and max_print_line is never set
 - **PR #1544**: fix: redact home-directory paths from compile logs landed via sidecar copy
 - **Issue #1534** (closed): paper-audit: compile-log.txt commits absolute home-directory paths
 - **PR #1543**: fix: point anvil-owned links at 2AMLogic/anvil instead of rjwalters/anvil
