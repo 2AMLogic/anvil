@@ -123,6 +123,19 @@ trusting the underlying ``shutil`` copy silently. CLI shim::
     python -m anvil.lib.sidecar copy output/thread.2/figures \
         output/thread.3/figures
 
+Home-path redaction (issue #1534): pdflatex/bibtex logs name every loaded
+file by its absolute path, so a verbatim capture into a *tracked* sidecar
+(``compile-log.txt``, ``spec.build.log``) leaks ``/home/<user>/...`` and
+the local username — un-undoable after push in a public consumer repo.
+``--redact-home`` (and :func:`copy_bytes`'s ``redact_home=True`` /
+:func:`redact_home_paths` for Python drivers) rewrites the current user's
+home prefix to ``~`` on the staged copy before verification, so the landed
+log is redacted while the gate-relevant content (overfull-box lines, file
+scope markers, line numbers) is untouched::
+
+    python -m anvil.lib.sidecar copy /tmp/compile.log \
+        output/.thread.3.audit.tmp/compile-log.txt --redact-home
+
 Refuses (nonzero exit) if the source is missing or the destination
 already exists (``--force`` to overwrite deliberately) — the same
 immutability-first default every other write primitive in this module
@@ -332,6 +345,8 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import os
+import re
 import shutil
 from contextlib import contextmanager
 from pathlib import Path
@@ -353,6 +368,7 @@ __all__ = [
     "STAGING_SUFFIX",
     "SidecarIncompleteError",
     "SidecarCopyVerificationError",
+    "SidecarRedactionError",
     "staged_sidecar",
     "stage_enter",
     "commit_staged",
@@ -363,6 +379,7 @@ __all__ = [
     "supersede_sidecar",
     "prior_path_for",
     "copy_bytes",
+    "redact_home_paths",
     "staging_path_for",
     "backup_path_for",
     "cleanup_one_staging",
@@ -407,6 +424,17 @@ class SidecarCopyVerificationError(RuntimeError):
     verification found the destination does not match the source. The
     staged copy is left in place (unrenamed) for forensic inspection; the
     caller must not treat the destination as landed.
+    """
+
+
+class SidecarRedactionError(RuntimeError):
+    """:func:`copy_bytes` was asked to redact home-directory prefixes
+    (``redact_home=True`` / CLI ``--redact-home``) from a payload that is
+    not UTF-8 text. Refused rather than corrupted or silently skipped:
+    "redacting" a binary payload would corrupt it, and copying it through
+    un-redacted would leak the very home paths the flag exists to scrub.
+    The staged copy is left in place (unrenamed) and ``dst`` is never
+    landed (issue #1534).
     """
 
 
@@ -561,6 +589,128 @@ def _content_manifest(path: Path) -> dict:
     return {"": _file_content_key(path)}
 
 
+#: Characters that can continue a POSIX path name component. A home prefix
+#: immediately followed by one of these is a LONGER name that merely starts
+#: with the prefix (home ``/home/al`` inside ``/home/alice/...`` or
+#: ``/home/al-tools/...``), not the home directory itself — redacting it
+#: would corrupt the path, so the bare-prefix pass refuses those matches.
+_NAME_CONTINUATION_CHARS = r"[\w.~\-]"
+
+
+def _home_prefixes(home: Optional[str] = None) -> List[str]:
+    """Return the home-directory prefixes to redact, longest first.
+
+    With ``home=None`` these are the ambient user's: ``$HOME`` and
+    :meth:`pathlib.Path.home` (which itself resolves through ``$HOME`` on
+    POSIX but can diverge under a sandboxed ``pwd`` mapping, so both are
+    consulted). Trailing slashes are normalized; the empty string and the
+    filesystem root are dropped — a root "home" would redact every
+    absolute path in the payload rather than just the user's tree.
+    """
+    candidates: List[str] = []
+    if home is not None:
+        candidates.append(home)
+    else:
+        env_home = os.environ.get("HOME")
+        if env_home:
+            candidates.append(env_home)
+        try:
+            candidates.append(str(Path.home()))
+        except RuntimeError:
+            # Path.home() raises when the passwd lookup fails (e.g. a
+            # container without a passwd entry); $HOME above is the
+            # fallback and may itself be absent — then nothing is redacted.
+            pass
+    normalized = {c.rstrip("/") for c in candidates if c and c.strip()}
+    normalized.discard("")
+    normalized.discard("/")
+    return sorted(normalized, key=len, reverse=True)
+
+
+def redact_home_paths(text: str, home: Optional[str] = None) -> str:
+    """Rewrite the user's home-directory prefix to ``~`` (issue #1534).
+
+    ``pdflatex``/``bibtex`` logs name every file they load by its
+    kpathsea-resolved absolute path, so a per-user texmf tree writes
+    ``/home/<user>/...`` — the local username included — into any log
+    captured verbatim into a tracked audit sidecar. In a public consumer
+    repo that leak cannot be undone after push. This helper rewrites:
+
+    - ``<home>/rest`` → ``~/rest`` (the dominant shape: every file loaded
+      from under the home tree), and
+    - a bare ``<home>`` NOT followed by a path-name character → ``~``
+      (e.g. ``TEXMFHOME = /home/<user>`` at end of line, or
+      ``(/home/<user>)``), so the username cannot survive a bare
+      reference either.
+
+    Prefix boundaries are respected: ``/home/al`` does not match inside
+    ``/home/alice/...`` or ``/home/al-tools`` — only the prefix itself,
+    followed by ``/`` or by a non-name character, is rewritten, so no
+    other path is corrupted. Substitution is prefix-only: line count,
+    line numbers, and every other byte are untouched, so the render
+    gate's overfull parsing and file-scope resolution are unaffected
+    (``render_gate``'s ``_FILE_OPEN_RE`` has no leading-path requirement;
+    ``(~/texmf/...`` resolves exactly like ``(/home/<user>/texmf/...``).
+
+    When ``home`` is ``None`` (the default) the prefix set is the ambient
+    user's, longest first (see :func:`_home_prefixes`), so a nested
+    override cannot partially un-redact. With no resolvable home the text
+    is returned unchanged.
+    """
+    for prefix in _home_prefixes(home):
+        escaped = re.escape(prefix)
+        text = re.sub(escaped + r"/", "~/", text)
+        text = re.sub(escaped + r"(?!" + _NAME_CONTINUATION_CHARS + ")", "~", text)
+    return text
+
+
+def _redacted_file_bytes(path: Path) -> bytes:
+    """Return ``path``'s content as UTF-8 bytes with home prefixes
+    redacted (:func:`redact_home_paths`).
+
+    Refuses (:class:`SidecarRedactionError`) on non-UTF-8 content rather
+    than corrupting a binary payload or silently passing it through
+    un-redacted.
+    """
+    raw = path.read_bytes()
+    try:
+        text = raw.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise SidecarRedactionError(
+            f"--redact-home: {path!s} is not UTF-8 text ({exc}). Redacting "
+            f"a binary payload would corrupt it and copying it un-redacted "
+            f"would leak the home paths the flag exists to scrub — refused. "
+            f"The staged copy is left in place, unrenamed; dst is not landed."
+        ) from exc
+    return redact_home_paths(text).encode("utf-8")
+
+
+def _bytes_content_key(data: bytes) -> tuple:
+    """In-memory analog of :func:`_file_content_key` for expected
+    (possibly redacted) content: a ``(size, sha256)`` fingerprint."""
+    return (len(data), hashlib.sha256(data).hexdigest())
+
+
+def _expected_manifest(src: Path, *, redact_home: bool) -> dict:
+    """The manifest ``copy_bytes`` verification compares the staged copy
+    against: :func:`_content_manifest` of ``src`` un-redacted, or the same
+    manifest computed over each file's *redacted* bytes when
+    ``redact_home`` is set — so the check proves "staged == redacted(src)"
+    rather than failing on every redacted byte (issue #1534).
+    """
+    if not redact_home:
+        return _content_manifest(src)
+    if src.is_dir():
+        return {
+            str(p.relative_to(src).as_posix()): _bytes_content_key(
+                _redacted_file_bytes(p)
+            )
+            for p in sorted(src.rglob("*"))
+            if p.is_file()
+        }
+    return {"": _bytes_content_key(_redacted_file_bytes(src))}
+
+
 def copy_bytes(
     src: Path,
     dst: Path,
@@ -568,6 +718,7 @@ def copy_bytes(
     overwrite: bool = False,
     verify: bool = True,
     parents: bool = True,
+    redact_home: bool = False,
 ) -> Path:
     """Byte-safe copy of ``src`` to ``dst`` (issue #1017).
 
@@ -608,9 +759,26 @@ def copy_bytes(
         is never landed with unverified content. This should be
         unreachable in practice (the underlying copy is either exact or
         raises), but exists as defense-in-depth for the "byte-identity
-        verified" contract rather than trusting the copy silently.
+        verified" contract rather than trusting the copy silently. With
+        ``redact_home`` set, the comparison is against the *expected
+        redacted* bytes (:func:`_expected_manifest`), so verification
+        proves the landed copy matches the redacted source rather than
+        the raw one.
     parents:
         Forwarded to ``dst.parent``'s :meth:`pathlib.Path.mkdir`.
+    redact_home:
+        When ``True`` (issue #1534; CLI: ``--redact-home``), rewrite the
+        current user's home-directory prefix to ``~``
+        (:func:`redact_home_paths`) in every copied file, on the staged
+        copy — the source is never modified — before verification and the
+        atomic rename. Intended for compile-log captures destined for
+        tracked sidecars (``compile-log.txt``, ``spec.build.log``): a raw
+        pdflatex log names every loaded file by absolute path, leaking
+        ``/home/<user>/...`` and the local username into a public
+        consumer repo. Text payloads only: a non-UTF-8 file raises
+        :class:`SidecarRedactionError` (refused, not corrupted, never
+        landed) — binary trees (e.g. ``figures/`` PDFs) should not pass
+        this flag.
 
     Returns
     -------
@@ -625,6 +793,9 @@ def copy_bytes(
     SidecarCopyVerificationError
         If ``verify`` is ``True`` and the post-copy manifest does not match
         ``src``.
+    SidecarRedactionError
+        If ``redact_home`` is ``True`` and any payload file is not UTF-8
+        text.
     """
     src = Path(src)
     dst = Path(dst)
@@ -658,8 +829,21 @@ def copy_bytes(
     else:
         shutil.copy2(src, staging)
 
+    if redact_home:
+        # Redact in place on the staged copy — never the source — BEFORE
+        # verification, so the manifest below compares the staged bytes
+        # against the *expected redacted* content and a non-UTF-8 payload
+        # refuses (SidecarRedactionError) before anything is landed.
+        staged_files = (
+            [staging]
+            if staging.is_file()
+            else sorted(p for p in staging.rglob("*") if p.is_file())
+        )
+        for path in staged_files:
+            path.write_bytes(_redacted_file_bytes(path))
+
     if verify:
-        src_manifest = _content_manifest(src)
+        src_manifest = _expected_manifest(src, redact_home=redact_home)
         staged_manifest = _content_manifest(staging)
         if src_manifest != staged_manifest:
             missing = sorted(set(src_manifest) - set(staged_manifest))
@@ -1909,6 +2093,20 @@ def _build_cli_parser():
             "verify)."
         ),
     )
+    p_copy.add_argument(
+        "--redact-home",
+        action="store_true",
+        help=(
+            "Rewrite the current user's home-directory prefix to ~ in the "
+            "landed copy (issue #1534) — for compile-log captures bound "
+            "for a tracked sidecar (compile-log.txt, spec.build.log): a "
+            "raw pdflatex log names every loaded file by absolute path, "
+            "leaking /home/<user>/... and the local username. The source "
+            "is never modified; verification compares against the "
+            "redacted content. Text payloads only: non-UTF-8 input is "
+            "refused (exit 3), not corrupted."
+        ),
+    )
 
     return p
 
@@ -1948,13 +2146,17 @@ def main(argv: "Sequence[str] | None" = None) -> int:
       ``FINAL_DIR.prior-<k>`` (issue #1450) so ``stage`` can write a fresh
       one. Exit ``0`` on success (prints the archive path); ``3`` if
       FINAL_DIR is absent.
-    - ``copy SRC DST [--force] [--no-verify]`` — byte-safe copy of a file
-      or directory tree (issue #1017), staged then atomically renamed into
-      DST, with post-copy byte-identity verification by default. Exit
-      ``0`` on success (prints DST); ``3`` if SRC is missing or DST
-      already exists without ``--force``; ``1`` if ``--no-verify`` was NOT
-      passed and post-copy verification finds a mismatch (staged copy left
-      unrenamed for forensics).
+    - ``copy SRC DST [--force] [--no-verify] [--redact-home]`` — byte-safe
+      copy of a file or directory tree (issue #1017), staged then atomically
+      renamed into DST, with post-copy byte-identity verification by
+      default. ``--redact-home`` rewrites the current user's home prefix
+      to ``~`` in the landed copy (issue #1534; verification compares
+      against the redacted content). Exit ``0`` on success (prints DST);
+      ``3`` if SRC is missing, DST already exists without ``--force``, or
+      ``--redact-home`` met a non-UTF-8 payload (refused, not corrupted;
+      nothing landed); ``1`` if ``--no-verify`` was NOT passed and
+      post-copy verification finds a mismatch (staged copy left unrenamed
+      for forensics).
 
     Exit-code contract mirrors the sibling ``anvil/lib/*.py`` CLIs: ``0``
     clean, ``1`` a contract failure the caller must act on
@@ -2067,8 +2269,12 @@ def main(argv: "Sequence[str] | None" = None) -> int:
                 Path(args.dst),
                 overwrite=args.force,
                 verify=not args.no_verify,
+                redact_home=args.redact_home,
             )
         except (FileNotFoundError, FileExistsError) as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            return 3
+        except SidecarRedactionError as exc:
             print(f"error: {exc}", file=sys.stderr)
             return 3
         except SidecarCopyVerificationError as exc:
