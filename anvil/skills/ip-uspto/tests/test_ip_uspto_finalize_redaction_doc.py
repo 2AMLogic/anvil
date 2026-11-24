@@ -27,3 +27,9 @@ def test_finalize_doc_redacts_spec_build_log_capture():
     assert "spec.build.log" in text
     assert "--redact-home" in text
     assert "redact_home" in text
+
+
+def test_finalize_doc_lands_failure_log_in_staging_not_final_dir():
+    text = _read()
+    assert "<staging>/spec.build.log --redact-home" in text
+    assert "<thread>.final/spec.build.log --redact-home" not in text

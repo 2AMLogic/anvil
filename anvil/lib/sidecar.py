@@ -594,7 +594,13 @@ def _content_manifest(path: Path) -> dict:
 #: with the prefix (home ``/home/al`` inside ``/home/alice/...`` or
 #: ``/home/al-tools/...``), not the home directory itself — redacting it
 #: would corrupt the path, so the bare-prefix pass refuses those matches.
-_NAME_CONTINUATION_CHARS = r"[\w.~\-]"
+_NAME_CONTINUATION_CHARS = r"[\w.~\-+@]"
+
+#: Characters that, immediately BEFORE a home prefix, show the prefix is not
+#: the start of a path but the tail of a longer one (``/srv/archive`` +
+#: ``/home/al/...`` or ``foo~`` + ``/home/al``). A path start follows
+#: whitespace, ``(``, ``=``, ``:``, a quote, or line start — none of these.
+_NAME_PRECEDING_CHARS = r"[\w./~+@\-]"
 
 
 def _home_prefixes(home: Optional[str] = None) -> List[str]:
@@ -658,9 +664,16 @@ def redact_home_paths(text: str, home: Optional[str] = None) -> str:
     is returned unchanged.
     """
     for prefix in _home_prefixes(home):
-        escaped = re.escape(prefix)
-        text = re.sub(escaped + r"/", "~/", text)
-        text = re.sub(escaped + r"(?!" + _NAME_CONTINUATION_CHARS + ")", "~", text)
+        # One pass: the prefix must START a path (not be preceded by a name
+        # char or ``/``) and be a COMPLETE component (not followed by a name
+        # char). ``/`` is not a name char, so ``<home>/rest`` → ``~/rest``
+        # and a bare ``<home>`` → ``~`` fall out of the same match.
+        pattern = (
+            r"(?<!" + _NAME_PRECEDING_CHARS + ")"
+            + re.escape(prefix)
+            + r"(?!" + _NAME_CONTINUATION_CHARS + ")"
+        )
+        text = re.sub(pattern, "~", text)
     return text
 
 
@@ -680,7 +693,7 @@ def _redacted_file_bytes(path: Path) -> bytes:
             f"--redact-home: {path!s} is not UTF-8 text ({exc}). Redacting "
             f"a binary payload would corrupt it and copying it un-redacted "
             f"would leak the home paths the flag exists to scrub — refused. "
-            f"The staged copy is left in place, unrenamed; dst is not landed."
+            f"Nothing was written to the destination tree; dst is not landed."
         ) from exc
     return redact_home_paths(text).encode("utf-8")
 
@@ -824,23 +837,38 @@ def copy_bytes(
         else:
             staging.unlink()
 
-    if src.is_dir():
+    if redact_home:
+        # Decode + redact EVERYTHING in memory first, then write only the
+        # redacted bytes: raw (un-redacted) input never touches the
+        # destination tree, a non-UTF-8 payload refuses
+        # (SidecarRedactionError) before anything is written, and an
+        # interrupt cannot leave raw bytes in the checkout. Verification
+        # below compares the staged bytes against the same redacted
+        # content. Mode bits are applied AFTER the write so a read-only
+        # (0444) source does not block it.
+        if src.is_dir():
+            dirs = [p for p in sorted(src.rglob("*")) if p.is_dir()]
+            files = [p for p in sorted(src.rglob("*")) if p.is_file()]
+            payload = [
+                (p.relative_to(src), p, _redacted_file_bytes(p)) for p in files
+            ]
+            staging.mkdir()
+            for d in dirs:
+                (staging / d.relative_to(src)).mkdir(parents=True, exist_ok=True)
+            for rel, orig, data in payload:
+                target = staging / rel
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_bytes(data)
+                shutil.copymode(orig, target)
+            shutil.copymode(src, staging)
+        else:
+            data = _redacted_file_bytes(src)
+            staging.write_bytes(data)
+            shutil.copymode(src, staging)
+    elif src.is_dir():
         shutil.copytree(src, staging)
     else:
         shutil.copy2(src, staging)
-
-    if redact_home:
-        # Redact in place on the staged copy — never the source — BEFORE
-        # verification, so the manifest below compares the staged bytes
-        # against the *expected redacted* content and a non-UTF-8 payload
-        # refuses (SidecarRedactionError) before anything is landed.
-        staged_files = (
-            [staging]
-            if staging.is_file()
-            else sorted(p for p in staging.rglob("*") if p.is_file())
-        )
-        for path in staged_files:
-            path.write_bytes(_redacted_file_bytes(path))
 
     if verify:
         src_manifest = _expected_manifest(src, redact_home=redact_home)

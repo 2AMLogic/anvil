@@ -31,6 +31,7 @@ from __future__ import annotations
 import itertools
 import json
 import logging
+import os
 import shutil
 from pathlib import Path
 
@@ -1937,6 +1938,66 @@ def test_cli_copy_redact_home_non_utf8_exit_three(tmp_path, capsys, monkeypatch)
 
     assert rc == 3
     assert not dst.exists()
+
+
+def test_redact_home_paths_does_not_match_inside_longer_paths():
+    home = "/home/al"
+    for text in (
+        "(/srv/archive/home/al/pkg.tex)",
+        "(/home/al+ci/pkg.tex)",
+        "(/home/al@host/pkg.tex)",
+        "x~/home/al/pkg.tex",
+    ):
+        assert redact_home_paths(text, home=home) == text
+    assert redact_home_paths("(/home/al/pkg.tex)", home=home) == "(~/pkg.tex)"
+    assert redact_home_paths("a=/home/al:/b", home=home) == "a=~:/b"
+
+
+def test_copy_bytes_redact_home_non_utf8_leaves_no_raw_bytes(tmp_path, monkeypatch):
+    home = tmp_path / "home" / "alice"
+    monkeypatch.setenv("HOME", str(home))
+    src = tmp_path / "spec.log"
+    src.write_bytes(f"({home}/x.sty\n".encode() + b"\xff")
+    dst = tmp_path / "out" / "spec.build.log"
+
+    with pytest.raises(SidecarRedactionError):
+        copy_bytes(src, dst, redact_home=True)
+
+    assert not dst.exists()
+    assert list(dst.parent.iterdir()) == []
+
+
+def test_copy_bytes_redact_home_dir_later_invalid_file_leaves_no_raw_bytes(
+    tmp_path, monkeypatch
+):
+    home = tmp_path / "home" / "alice"
+    monkeypatch.setenv("HOME", str(home))
+    src = tmp_path / "logs"
+    src.mkdir()
+    (src / "a.log").write_text(f"({home}/a.sty\n", encoding="utf-8")
+    (src / "z.log").write_bytes(b"\xff\xfe")
+    dst = tmp_path / "out" / "logs-copy"
+
+    with pytest.raises(SidecarRedactionError):
+        copy_bytes(src, dst, redact_home=True)
+
+    assert not dst.exists()
+    assert list(dst.parent.iterdir()) == []
+
+
+@pytest.mark.skipif(os.name == "nt" or os.geteuid() == 0, reason="needs non-root POSIX")
+def test_copy_bytes_redact_home_read_only_source(tmp_path, monkeypatch):
+    home = tmp_path / "home" / "alice"
+    monkeypatch.setenv("HOME", str(home))
+    src = tmp_path / "spec.log"
+    src.write_text(f"({home}/x.sty\n", encoding="utf-8")
+    src.chmod(0o444)
+    dst = tmp_path / "out" / "spec.build.log"
+
+    copy_bytes(src, dst, redact_home=True)
+
+    assert dst.read_text(encoding="utf-8") == "(~/x.sty\n"
+    assert (dst.stat().st_mode & 0o777) == 0o444
 
 
 # ---------------------------------------------------------------------------
