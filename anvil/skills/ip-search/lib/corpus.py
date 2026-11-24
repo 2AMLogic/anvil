@@ -138,7 +138,7 @@ def key_env_hint(corpus: str) -> str:
 # HTTP plumbing
 # ---------------------------------------------------------------------------
 
-_USER_AGENT = "anvil-ip-search/0.1 (https://github.com/rjwalters/anvil)"
+_USER_AGENT = "anvil-ip-search/0.1 (https://github.com/2AMLogic/anvil)"
 _TIMEOUT_S = 20.0
 _RETRY_DELAYS = (1.0, 2.0)
 
