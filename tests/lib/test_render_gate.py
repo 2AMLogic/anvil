@@ -336,6 +336,77 @@ def test_file_scope_transitions_tracks_nested_input(overfull_input_child_log):
     assert rg._file_at_offset(positions, files, len(log_text) - 1) == "spec.tex"
 
 
+def test_overfull_parsing_identical_on_redacted_log(
+    tmp_path, empty_pdf, fake_pdfinfo_3pages_path
+):
+    """A ``--redact-home``-redacted compile log parses identically (#1534).
+
+    ``paper-audit`` lands ``compile-log.txt`` through
+    ``anvil.lib.sidecar copy --redact-home``, which rewrites the ambient
+    home prefix to ``~`` before the log reaches a tracked audit sidecar.
+    The gate must draw the same conclusions from the redacted log: the
+    file-open regex has no leading-path requirement, so ``(~/texmf/...``
+    scope markers resolve like ``/home/<user>/texmf/...`` ones, and only
+    the path prefix is substituted — line numbers and box geometry are
+    untouched.
+    """
+    from anvil.lib.sidecar import redact_home_paths
+
+    home = tmp_path / "home" / "alice"
+    raw = (
+        "This is pdfTeX\n"
+        f"({home}/texmf/tex/latex/anvil/anvil-uspto.cls\n"
+        "(./spec.tex\n"
+        "(./claims.tex [14]\n"
+        "Overfull \\hbox (5.056pt too wide) in paragraph at lines 62--63\n"
+        "[]\\OT1/cmr/m/n/10 A dependent method claim reciting the radius.\n"
+        ")\n"
+        ")\n"
+        "Output written on spec.pdf (16 pages, 34567 bytes).\n"
+    )
+    redacted = redact_home_paths(raw, home=str(home))
+    assert str(home) in raw
+    assert str(home) not in redacted
+    assert "(~/texmf/tex/latex/anvil/anvil-uspto.cls" in redacted
+    # Line structure survives byte-for-byte outside the substituted prefix.
+    assert redacted.count("\n") == raw.count("\n")
+
+    raw_log = tmp_path / "raw.log"
+    redacted_log = tmp_path / "redacted.log"
+    raw_log.write_text(raw, encoding="utf-8")
+    redacted_log.write_text(redacted, encoding="utf-8")
+
+    results = {}
+    for name, log in (("raw", raw_log), ("redacted", redacted_log)):
+        results[name] = gate(
+            empty_pdf,
+            log_path=log,
+            source_paths=[Path("spec.tex"), Path("claims.tex")],
+            page_cap=None,
+            overfull_threshold_pt=2.0,
+            pdfinfo_path=fake_pdfinfo_3pages_path,
+        )
+
+    assert len(results["raw"].overfull_boxes) == 1
+    assert len(results["redacted"].overfull_boxes) == 1
+
+    def _shape(box):
+        return (box["kind"], box["line"], box["amount_pt"])
+
+    assert _shape(results["raw"].overfull_boxes[0]) == _shape(
+        results["redacted"].overfull_boxes[0]
+    )
+    # File attribution still resolves through the redacted scope marker:
+    # the box belongs to the input'd child, with the class-file path
+    # redacted in the `file` field but attribution itself intact.
+    assert results["raw"].overfull_boxes[0]["file"] == "claims.tex"
+    assert results["redacted"].overfull_boxes[0]["file"] == "claims.tex"
+    # The verdict is unchanged: the redacted log still fails the gate the
+    # way the raw one does (DIM_OVERFULL present in both).
+    assert DIM_OVERFULL in results["raw"].failed_gates
+    assert DIM_OVERFULL in results["redacted"].failed_gates
+
+
 def test_overfull_legal_canary_shape(
     empty_pdf, fake_pdfinfo_3pages_path, overfull_legal_canary_log
 ):

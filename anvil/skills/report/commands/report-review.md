@@ -78,7 +78,7 @@ This command is one of the two REQUIRED critic siblings for the report skill. Th
    - Invoke `anvil/lib/render_gate/`'s `gate(...)` against `<thread>.{N}/report.pdf` (produced by `report-figures`; see `commands/report-figures.md`).
    - **Inputs:**
      - `pdf_path`: `<thread>.{N}/report.pdf`.
-     - `log_path`: when `_project.md.delivery_format` is the LaTeX path, the compile log captured by `report-figures` at `<thread>.{N}/.report-build.log`; otherwise `None` (pandoc path produces no persistent log).
+     - `log_path`: when `_project.md.delivery_format` is the LaTeX path, the compile log captured by `report-figures` at `<thread>.{N}/.report-build.log`; otherwise `None` (pandoc path produces no persistent log). **Redaction exemption (issue #1534)**: no report command currently writes `.report-build.log` — `report-figures` has no LaTeX compile step, so the reference above is forward-looking and there is no capture site to redact today. Any future writer of a persistent build log into a tracked version dir MUST land it redacted (`anvil.lib.sidecar copy --redact-home` / `copy_bytes(..., redact_home=True)`), per the same home-path-leak contract `paper-audit` and the two ip-finalize commands enforce; the compile working-dir logs `compile_and_gate` leaves next to the `.tex` are untracked build byproducts (Out of Scope, issue #1534).
      - `source_paths`: `[<thread>.{N}/report.md]`.
      - `page_cap=None` — customer report length varies; the gate does not enforce. Consumers can override per-thread via `<thread>/.anvil.json: render_gate.page_cap`.
      - `overfull_threshold_pt=5.0`, `placeholder_patterns=None` (use `DEFAULT_PLACEHOLDER_PATTERNS`).

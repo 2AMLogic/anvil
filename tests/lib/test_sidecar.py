@@ -31,6 +31,7 @@ from __future__ import annotations
 import itertools
 import json
 import logging
+import os
 import shutil
 from pathlib import Path
 
@@ -42,6 +43,7 @@ from anvil.lib.sidecar import (
     STAGING_SUFFIX,
     SidecarCopyVerificationError,
     SidecarIncompleteError,
+    SidecarRedactionError,
     abort_replace,
     backup_path_for,
     cleanup_one_staging,
@@ -51,6 +53,7 @@ from anvil.lib.sidecar import (
     copy_bytes,
     main,
     recover_interrupted_replace,
+    redact_home_paths,
     stage_enter,
     stage_replace,
     supersede_sidecar,
@@ -1779,6 +1782,222 @@ def test_cli_copy_no_verify_flag_skips_verification(tmp_path, capsys, monkeypatc
 
     assert rc == 0
     assert dst.read_bytes() == b"corrupted"
+
+
+# ---------------------------------------------------------------------------
+# redact_home_paths / copy_bytes --redact-home (issue #1534)
+# ---------------------------------------------------------------------------
+
+
+def test_redact_home_paths_rewrites_explicit_home_prefix():
+    text = (
+        "This is pdfTeX\n"
+        "(/home/alice/texmf/tex/latex/anvil/anvil-uspto.cls\n"
+        "Overfull \\hbox (5.056pt too wide) in paragraph at lines 62--63\n"
+    )
+    out = redact_home_paths(text, home="/home/alice")
+    assert out == (
+        "This is pdfTeX\n"
+        "(~/texmf/tex/latex/anvil/anvil-uspto.cls\n"
+        "Overfull \\hbox (5.056pt too wide) in paragraph at lines 62--63\n"
+    )
+
+
+def test_redact_home_paths_prefix_of_longer_name_not_corrupted():
+    # /home/al must NOT match inside /home/alice/... or /home/al-tools/... —
+    # name-continuation characters (alnum, ., _, -, ~) block the bare match.
+    text = "(/home/alice/texmf/foo.sty) (/home/al-tools/bar.sty)"
+    assert redact_home_paths(text, home="/home/al") == text
+
+
+def test_redact_home_paths_bare_home_at_end_and_delimiters():
+    assert (
+        redact_home_paths("TEXMFHOME = /home/alice", home="/home/alice")
+        == "TEXMFHOME = ~"
+    )
+    assert redact_home_paths("(/home/alice)", home="/home/alice") == "(~)"
+    assert (
+        redact_home_paths("paths: /home/alice; done", home="/home/alice")
+        == "paths: ~; done"
+    )
+
+
+def test_redact_home_paths_line_count_unchanged():
+    text = "a /home/alice/x.sty\nb\nc /home/alice/y.sty\n"
+    out = redact_home_paths(text, home="/home/alice")
+    assert out.count("\n") == text.count("\n")
+    assert out.splitlines() == ["a ~/x.sty", "b", "c ~/y.sty"]
+
+
+def test_redact_home_paths_trailing_slash_home_normalized():
+    out = redact_home_paths("(/home/alice/texmf/x.sty", home="/home/alice/")
+    assert out == "(~/texmf/x.sty"
+
+
+def test_redact_home_paths_root_and_empty_home_are_noops():
+    text = "(/home/alice/x.sty)"
+    assert redact_home_paths(text, home="/") == text
+    assert redact_home_paths(text, home="") == text
+
+
+def test_redact_home_paths_leaves_other_text_byte_identical():
+    text = "no paths here\n(/usr/local/texlive/2024/a.cls\n"
+    assert redact_home_paths(text, home="/home/alice") == text
+
+
+def test_redact_home_paths_empty_text_is_empty():
+    assert redact_home_paths("", home="/home/alice") == ""
+
+
+def test_copy_bytes_redact_home_lands_redacted_and_verified(tmp_path, monkeypatch):
+    home = tmp_path / "home" / "alice"
+    monkeypatch.setenv("HOME", str(home))
+    src = tmp_path / "scratch.log"
+    src.write_text(
+        f"({home}/texmf/tex/latex/anvil/anvil-uspto.cls\n"
+        "Overfull \\hbox (5.056pt too wide) in paragraph at lines 62--63\n",
+        encoding="utf-8",
+    )
+    dst = tmp_path / "audit" / "compile-log.txt"
+
+    landed = copy_bytes(src, dst, redact_home=True)
+
+    assert landed == dst
+    out = dst.read_text(encoding="utf-8")
+    assert str(home) not in out
+    assert "(~/texmf/tex/latex/anvil/anvil-uspto.cls" in out
+    assert "Overfull \\hbox (5.056pt too wide) in paragraph at lines 62--63" in out
+    assert not staging_path_for(dst).exists()
+    # Redaction happens on the copy — the source scratch log is untouched.
+    assert str(home) in src.read_text(encoding="utf-8")
+
+
+def test_copy_bytes_redact_home_directory_tree(tmp_path, monkeypatch):
+    home = tmp_path / "home" / "alice"
+    monkeypatch.setenv("HOME", str(home))
+    src = tmp_path / "logs"
+    (src / "sub").mkdir(parents=True)
+    (src / "a.log").write_text(f"({home}/texmf/a.sty\n", encoding="utf-8")
+    (src / "sub" / "b.log").write_text(f"({home}/texmf/b.sty\n", encoding="utf-8")
+
+    copy_bytes(src, tmp_path / "dst-tree", redact_home=True)
+
+    assert (tmp_path / "dst-tree" / "a.log").read_text(encoding="utf-8") == (
+        "(~/texmf/a.sty\n"
+    )
+    assert (tmp_path / "dst-tree" / "sub" / "b.log").read_text(
+        encoding="utf-8"
+    ) == "(~/texmf/b.sty\n"
+
+
+def test_copy_bytes_redact_home_refuses_non_utf8(tmp_path, monkeypatch):
+    monkeypatch.setenv("HOME", str(tmp_path / "home" / "alice"))
+    src = tmp_path / "fig.pdf"
+    src.write_bytes(b"%PDF-1.4\x9c\x8b\xfe\xff binary")
+    dst = tmp_path / "out" / "compile-log.txt"
+
+    with pytest.raises(SidecarRedactionError):
+        copy_bytes(src, dst, redact_home=True)
+
+    assert not dst.exists()
+
+
+def test_copy_bytes_redact_home_still_redacts_with_no_verify(tmp_path, monkeypatch):
+    home = tmp_path / "home" / "alice"
+    monkeypatch.setenv("HOME", str(home))
+    src = tmp_path / "scratch.log"
+    src.write_text(f"({home}/texmf/x.sty\n", encoding="utf-8")
+    dst = tmp_path / "compile-log.txt"
+
+    copy_bytes(src, dst, verify=False, redact_home=True)
+
+    assert dst.read_text(encoding="utf-8") == "(~/texmf/x.sty\n"
+
+
+def test_cli_copy_redact_home_lands_redacted_log(tmp_path, capsys, monkeypatch):
+    home = tmp_path / "home" / "alice"
+    monkeypatch.setenv("HOME", str(home))
+    src = tmp_path / "scratch.log"
+    src.write_text(f"({home}/texmf/x.sty\n", encoding="utf-8")
+    dst = tmp_path / "audit" / "compile-log.txt"
+
+    rc = main(["copy", str(src), str(dst), "--redact-home"])
+
+    assert rc == 0
+    assert capsys.readouterr().out.strip() == str(dst)
+    assert dst.read_text(encoding="utf-8") == "(~/texmf/x.sty\n"
+
+
+def test_cli_copy_redact_home_non_utf8_exit_three(tmp_path, capsys, monkeypatch):
+    monkeypatch.setenv("HOME", str(tmp_path / "home" / "alice"))
+    src = tmp_path / "fig.pdf"
+    src.write_bytes(b"%PDF\x9c\xfe")
+    dst = tmp_path / "compile-log.txt"
+
+    rc = main(["copy", str(src), str(dst), "--redact-home"])
+
+    assert rc == 3
+    assert not dst.exists()
+
+
+def test_redact_home_paths_does_not_match_inside_longer_paths():
+    home = "/home/al"
+    for text in (
+        "(/srv/archive/home/al/pkg.tex)",
+        "(/home/al+ci/pkg.tex)",
+        "(/home/al@host/pkg.tex)",
+        "x~/home/al/pkg.tex",
+    ):
+        assert redact_home_paths(text, home=home) == text
+    assert redact_home_paths("(/home/al/pkg.tex)", home=home) == "(~/pkg.tex)"
+    assert redact_home_paths("a=/home/al:/b", home=home) == "a=~:/b"
+
+
+def test_copy_bytes_redact_home_non_utf8_leaves_no_raw_bytes(tmp_path, monkeypatch):
+    home = tmp_path / "home" / "alice"
+    monkeypatch.setenv("HOME", str(home))
+    src = tmp_path / "spec.log"
+    src.write_bytes(f"({home}/x.sty\n".encode() + b"\xff")
+    dst = tmp_path / "out" / "spec.build.log"
+
+    with pytest.raises(SidecarRedactionError):
+        copy_bytes(src, dst, redact_home=True)
+
+    assert not dst.exists()
+    assert list(dst.parent.iterdir()) == []
+
+
+def test_copy_bytes_redact_home_dir_later_invalid_file_leaves_no_raw_bytes(
+    tmp_path, monkeypatch
+):
+    home = tmp_path / "home" / "alice"
+    monkeypatch.setenv("HOME", str(home))
+    src = tmp_path / "logs"
+    src.mkdir()
+    (src / "a.log").write_text(f"({home}/a.sty\n", encoding="utf-8")
+    (src / "z.log").write_bytes(b"\xff\xfe")
+    dst = tmp_path / "out" / "logs-copy"
+
+    with pytest.raises(SidecarRedactionError):
+        copy_bytes(src, dst, redact_home=True)
+
+    assert not dst.exists()
+    assert list(dst.parent.iterdir()) == []
+
+
+@pytest.mark.skipif(os.name == "nt" or os.geteuid() == 0, reason="needs non-root POSIX")
+def test_copy_bytes_redact_home_read_only_source(tmp_path, monkeypatch):
+    home = tmp_path / "home" / "alice"
+    monkeypatch.setenv("HOME", str(home))
+    src = tmp_path / "spec.log"
+    src.write_text(f"({home}/x.sty\n", encoding="utf-8")
+    src.chmod(0o444)
+    dst = tmp_path / "out" / "spec.build.log"
+
+    copy_bytes(src, dst, redact_home=True)
+
+    assert dst.read_text(encoding="utf-8") == "(~/x.sty\n"
+    assert (dst.stat().st_mode & 0o777) == 0o444
 
 
 # ---------------------------------------------------------------------------

@@ -48,6 +48,20 @@ def test_paper_audit_doc_references_issue_350():
     assert "#350" in text
 
 
+def test_paper_audit_doc_redacts_home_paths_in_compile_log_capture():
+    """The compile-log capture routes through ``--redact-home`` (#1534).
+
+    pdflatex logs name every loaded file by absolute path, so a verbatim
+    capture leaks ``/home/<user>/...`` (and the local username) into the
+    tracked audit sidecar — un-undoable after push in a public consumer
+    repo. Both capture paths (driverless ``sidecar copy`` and the
+    Python-driver ``copy_bytes`` route) must document the redaction.
+    """
+    text = _read()
+    assert "--redact-home" in text
+    assert "redact_home" in text
+
+
 def test_paper_audit_doc_documents_non_python_driver_fallback():
     """Guard the #645 two-tier non-Python-driver fallback clause (#655).
 
