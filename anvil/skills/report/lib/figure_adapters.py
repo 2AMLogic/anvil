@@ -428,10 +428,21 @@ def _write_failed_stub(
     before it is written (issue #1546, the #1534 redaction contract
     extended to failure stubs): adapter stderr routinely names absolute
     paths (``/home/<user>/...``), and a tracked stub in a public
-    consumer repo cannot be un-pushed.
+    consumer repo cannot be un-pushed. The displayed ``**Command**``
+    line gets the same treatment per argument, **before** shell quoting
+    (issue #1550): the dispatcher substitutes ``{input}``/``{output}``
+    with unconditionally absolute, home-prefixed paths, and quoting an
+    argument whose home prefix itself contains a shell metacharacter
+    (e.g. ``/home/O'Neil``) splits the prefix so redacting the joined
+    line can no longer match it. Only this diagnostic copy is redacted —
+    the subprocess has already run on the original argv.
     """
     stub = output_path.parent / (output_path.name + ".FAILED.md")
-    cmd_line = " ".join(shlex.quote(t) for t in argv) if argv else "(not invoked)"
+    cmd_line = (
+        " ".join(shlex.quote(redact_home_paths(t)) for t in argv)
+        if argv
+        else "(not invoked)"
+    )
     stderr_block = redact_home_paths(stderr.strip()) or "(no stderr captured)"
     text = (
         f"# figure-adapter failure: {adapter.name} / {unit}\n"
