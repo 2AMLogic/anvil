@@ -10,6 +10,7 @@ Test filename is distinct from other ``tests/lib/test_*`` modules per #58.
 from __future__ import annotations
 
 import json
+from importlib import import_module
 from pathlib import Path
 
 import pytest
@@ -962,6 +963,124 @@ Hello, render-gate.
     assert r.compile_status == COMPILE_OK
     assert r.pages == 1
     assert r.passed is True
+
+
+# -----------------------------------------------------------------------------
+# compile_and_gate: LaTeX-engine env contract (issue #1545)
+# -----------------------------------------------------------------------------
+
+
+# The package __init__ re-exports the compile_and_gate *function*, shadowing
+# the submodule attribute — resolve the module itself for monkeypatching.
+_cag_mod = import_module("anvil.lib.render_gate.compile_and_gate")
+
+
+def _stub_gate(**kwargs):
+    """Minimal gate() stub — these tests assert the subprocess env, not the
+    gate's PDF/log analysis."""
+    return GateResult(
+        pdf_path=kwargs.get("pdf_path", "x"),
+        log_path=None,
+        pages=None,
+        page_cap=None,
+        overfull_boxes=[],
+        overfull_threshold_pt=5.0,
+        compile_status=kwargs.get("compile_status", COMPILE_OK),
+        compile_exit_code=kwargs.get("compile_exit_code", 0),
+        placeholders=[],
+        passed=True,
+        reasons=[],
+    )
+
+
+class _FakeProc:
+    returncode = 0
+    stdout = ""
+    stderr = ""
+
+
+def test_compile_and_gate_latex_env_sets_max_print_line(tmp_path, monkeypatch):
+    """LaTeX-engine compiles run with max_print_line=10000 in env (issue #1545).
+
+    TeX wraps log lines at max_print_line (default 79), which can split a
+    home path mid-prefix and defeat downstream home-path redaction. The
+    env must reach the engine call and preserve the caller's other vars.
+    """
+    import os
+
+    tex = tmp_path / "foo.tex"
+    tex.write_text(r"\documentclass{article}\begin{document}hi\end{document}")
+
+    monkeypatch.setattr(
+        _cag_mod.shutil, "which", lambda name: f"/usr/bin/{name}"
+    )
+    monkeypatch.setattr(_cag_mod, "gate", _stub_gate)
+
+    captured = {}
+
+    def fake_run(cmd, **kwargs):
+        captured["cmd"] = list(cmd)
+        captured["kwargs"] = kwargs
+        return _FakeProc()
+
+    monkeypatch.setattr(_cag_mod.subprocess, "run", fake_run)
+
+    compile_and_gate(tex, engine="xelatex")
+
+    assert captured["cmd"][0] == "xelatex"
+    env = captured["kwargs"].get("env")
+    assert isinstance(env, dict), "LaTeX engine must receive an explicit env"
+    assert env["max_print_line"] == "10000"
+    assert env["PATH"] == os.environ["PATH"]
+
+
+def test_compile_and_gate_latex_env_caller_value_wins(tmp_path, monkeypatch):
+    """A caller-set max_print_line is not overridden (issue #1545 edge case)."""
+    tex = tmp_path / "foo.tex"
+    tex.write_text(r"\documentclass{article}\begin{document}hi\end{document}")
+
+    monkeypatch.setattr(
+        _cag_mod.shutil, "which", lambda name: f"/usr/bin/{name}"
+    )
+    monkeypatch.setattr(_cag_mod, "gate", _stub_gate)
+    monkeypatch.setenv("max_print_line", "321")
+
+    captured = {}
+
+    def fake_run(cmd, **kwargs):
+        captured["kwargs"] = kwargs
+        return _FakeProc()
+
+    monkeypatch.setattr(_cag_mod.subprocess, "run", fake_run)
+
+    compile_and_gate(tex, engine="pdflatex")
+
+    assert captured["kwargs"]["env"]["max_print_line"] == "321"
+
+
+def test_compile_and_gate_pandoc_env_untouched(tmp_path, monkeypatch):
+    """The pandoc branch passes no env override (issue #1545: LaTeX only)."""
+    tex = tmp_path / "foo.md"
+    tex.write_text("# Hello")
+
+    monkeypatch.setattr(
+        _cag_mod.shutil, "which", lambda name: f"/usr/bin/{name}"
+    )
+    monkeypatch.setattr(_cag_mod, "gate", _stub_gate)
+
+    captured = {}
+
+    def fake_run(cmd, **kwargs):
+        captured["cmd"] = list(cmd)
+        captured["kwargs"] = kwargs
+        return _FakeProc()
+
+    monkeypatch.setattr(_cag_mod.subprocess, "run", fake_run)
+
+    compile_and_gate(tex, engine="pandoc")
+
+    assert captured["cmd"][0] == "pandoc"
+    assert captured["kwargs"].get("env") is None, "pandoc env must stay untouched"
 
 
 # -----------------------------------------------------------------------------

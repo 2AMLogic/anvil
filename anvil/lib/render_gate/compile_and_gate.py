@@ -9,6 +9,7 @@ for the full package rationale.
 
 from __future__ import annotations
 
+import os
 import shutil
 import subprocess
 from pathlib import Path
@@ -112,6 +113,8 @@ def compile_and_gate(
     # error doesn't hang; for pandoc, the -o flag determines output.
     if engine == PANDOC_ENGINE:
         cmd = [engine, str(tex_path), "-o", str(pdf_path)]
+        # Pandoc writes no TeX log — its env stays untouched.
+        engine_env = None
     else:
         cmd = [
             engine,
@@ -120,6 +123,12 @@ def compile_and_gate(
             str(out_dir),
             str(tex_path),
         ]
+        # LaTeX engines wrap log lines at max_print_line (TeX default 79),
+        # inserting a bare newline that can split a home path mid-prefix and
+        # defeat downstream home-path redaction (issue #1545). Raise it so
+        # every path stays contiguous; a caller-set value wins.
+        engine_env = dict(os.environ)
+        engine_env.setdefault("max_print_line", "10000")
     try:
         proc = subprocess.run(
             cmd,
@@ -127,6 +136,7 @@ def compile_and_gate(
             text=True,
             check=False,
             cwd=str(out_dir),
+            env=engine_env,
         )
         exit_code = proc.returncode
         compile_status = COMPILE_OK if exit_code == 0 else COMPILE_FAILED

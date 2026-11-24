@@ -44,6 +44,7 @@ Public API
 
 from __future__ import annotations
 
+import os
 import shutil
 import string
 import subprocess
@@ -222,6 +223,13 @@ def render_brief_to_pdf(
             str(tex_file),
         ]
 
+        # TeX wraps log lines at max_print_line (default 79), inserting a
+        # bare newline that can split a home path mid-prefix and defeat
+        # downstream home-path redaction (issue #1545). Raise it so every
+        # path stays contiguous; a caller-set value wins.
+        engine_env = dict(os.environ)
+        engine_env.setdefault("max_print_line", "10000")
+
         # First pass. In a two-pass LaTeX compile the first invocation
         # routinely reports errors/warnings (missing .aux data, unresolved
         # cross-references) that the second pass silently resolves, so its
@@ -235,6 +243,7 @@ def render_brief_to_pdf(
             text=True,
             check=False,
             cwd=str(tmpdir),
+            env=engine_env,
         )
         # Second pass (for cross-references / TOC)
         proc2 = subprocess.run(
@@ -243,6 +252,7 @@ def render_brief_to_pdf(
             text=True,
             check=False,
             cwd=str(tmpdir),
+            env=engine_env,
         )
 
         exit_code = proc2.returncode
